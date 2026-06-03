@@ -29,6 +29,204 @@
 Docker compose で **OpenTelemetry の動作を一通り体験**できるラボ環境。
 **公式 contrib-auto-laravel** と **community keepsuit/laravel-opentelemetry** の **2 つの実装を並列で動かして比較**できる構成。
 
+## 全体アーキテクチャ
+
+```mermaid
+flowchart TB
+    CL["Browser / curl"]
+
+    subgraph LAB["Docker Compose"]
+        direction TB
+
+        subgraph WEB["Web 層"]
+            direction LR
+            NG["lab-nginx<br/>+ ngx_otel_module"]
+        end
+
+        subgraph APP["アプリ層"]
+            direction LR
+            PHP["lab-php<br/>Laravel 11<br/>+ ext-opentelemetry<br/>+ opentelemetry-auto-laravel<br/>(公式 contrib)"]
+            PHP2["lab-php-v2<br/>Laravel 11<br/>+ ext-opentelemetry<br/>+ keepsuit/laravel-opentelemetry<br/>(community)"]
+        end
+
+        subgraph DATA["データ層"]
+            direction LR
+            PG[("lab-postgres<br/>laravel / laravel_v2")]
+        end
+
+        subgraph OBS["Observability 層"]
+            direction TB
+            COL["lab-otel-collector<br/>+ spanmetrics connector"]
+            TEMPO[("lab-tempo<br/>trace 保管<br/>Parquet")]
+            PROM[("lab-prometheus<br/>metrics 保管<br/>TSDB")]
+            GR["lab-grafana<br/>(UI のみ)"]
+        end
+    end
+
+    CL -- ":8080 公式版" --> NG
+    CL -- ":8081 keepsuit 版" --> NG
+    NG -- "fastcgi :80" --> PHP
+    NG -- "fastcgi :81" --> PHP2
+
+    PHP -- "SQL (DB:laravel)" --> PG
+    PHP2 -- "SQL (DB:laravel_v2)" --> PG
+
+    NG -. "OTLP gRPC" .-> COL
+    PHP -. "OTLP HTTP" .-> COL
+    PHP2 -. "OTLP HTTP" .-> COL
+
+    COL -- "trace" --> TEMPO
+    COL -- "metrics<br/>(spanmetrics 生成)" --> PROM
+    TEMPO --> GR
+    PROM --> GR
+    CL -. ":3000" .-> GR
+```
+
+## リクエスト発生から Grafana 可視化までのシーケンス
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CL as Browser
+    participant NG as nginx<br/>(ngx_otel_module)
+    participant L as Laravel<br/>(PHP-FPM + ext-otel)
+    participant DB as PostgreSQL
+    participant C as OTel Collector
+    participant T as Tempo
+    participant P as Prometheus
+    participant G as Grafana
+
+    CL->>NG: GET /cache-demo
+    Note over NG: nginx span 開始<br/>trace_id 新規生成
+
+    NG->>L: fastcgi<br/>(HTTP_TRACEPARENT で伝搬)
+    Note over L: Laravel span 開始<br/>parent_span_id=nginx
+
+    L->>DB: SELECT * FROM cache WHERE key=?
+    Note over L: SQL span (auto)
+    DB-->>L: rows
+
+    L-->>NG: 200 OK
+    NG-->>CL: 200 OK
+
+    par 各サービスから非同期で送信
+        NG->>C: OTLP gRPC (nginx span)
+    and
+        L->>C: OTLP HTTP (Laravel/SQL spans)
+    end
+
+    Note over C: ・1秒バッファでバッチ<br/>・spanmetrics connector が<br/>  trace → metrics 自動生成
+
+    par trace + metrics の出力
+        C->>T: trace を OTLP gRPC
+        Note over T: Parquet 形式で永続化<br/>(/var/tempo/blocks)
+    and
+        C->>P: metrics を remote_write
+        Note over P: TSDB に書き込み<br/>(/prometheus)
+    end
+
+    Note over CL,G: --- 別タイミングで可視化 ---
+
+    CL->>G: ダッシュボード閲覧 (:3000)
+    G->>T: TraceQL クエリ
+    T-->>G: 該当 trace
+    G->>P: PromQL クエリ (RPS/p95)
+    P-->>G: 時系列データ
+    G-->>CL: タイムライン + グラフ表示
+```
+
+## 公式 contrib vs keepsuit の span 構造比較
+
+同じ `GET /cache-demo` リクエストが、両者でどう trace 化されるかの差。
+
+```mermaid
+flowchart TB
+    subgraph OFF["公式 contrib-auto-laravel (lab-php)"]
+        direction TB
+        O1["GET /cache-demo"]
+        O1 --> O2["Cache::remember<br/>(手動計装が必要 ★)"]
+        O2 --> O3["sql SELECT"]
+        O2 --> O4["sql INSERT"]
+        style O2 fill:#fff3cd,stroke:#ffc107
+    end
+
+    subgraph KS["keepsuit/laravel-opentelemetry (lab-php-v2)"]
+        direction TB
+        K1["GET /cache-demo"]
+        K1 -. "events" .-> K2{{"cache miss<br/>key=cache-demo:hot-data"}}
+        K1 -. "events" .-> K3{{"cache set<br/>key=...<br/>expires_in_seconds=30"}}
+        K1 --> K4["SELECT"]
+        K1 --> K5["INSERT"]
+        style K2 fill:#d4edda,stroke:#28a745
+        style K3 fill:#d4edda,stroke:#28a745
+    end
+```
+
+```
+[公式]  細かく独立 span を生やす流儀
+       → Cache/Event は auto では出ない、手動計装ヘルパーで補う
+[keepsuit] 親 span の events として記録する流儀
+       → Cache/Event は key/hit/miss/TTL まで auto で取れる
+```
+
+## /full-demo の trace hierarchy (公式版)
+
+1 リクエストで全カテゴリの span が出る `/full-demo` の階層構造。
+
+```mermaid
+graph TD
+    A["GET /full-demo<br/>(HTTP server span)"]
+    A --> A1["sql SELECT"]
+    A --> B["full-demo<br/>(手動 親 span)"]
+
+    B --> C["App\Models\Race::get"]
+    C --> C1["sql SELECT"]
+
+    B --> D["Cache::remember(full)<br/>(手動計装)"]
+    D --> D1["sql SELECT"]
+    D --> D2["sql INSERT"]
+
+    B --> E["Event:RaceRegistered.dispatch(full)<br/>(手動計装)"]
+
+    B --> F["Job:SendWelcomeEmail.dispatch(full)<br/>(手動計装)"]
+    F --> F1["sql INSERT"]
+
+    B --> G["GET<br/>(HTTP Client to jsonplaceholder)"]
+    G --> G1["sql SELECT"]
+    G --> G2["sql INSERT"]
+
+    style B fill:#fff3cd,stroke:#ffc107
+    style D fill:#fff3cd,stroke:#ffc107
+    style E fill:#fff3cd,stroke:#ffc107
+    style F fill:#fff3cd,stroke:#ffc107
+```
+
+→ 黄色は手動計装 (web.php の `traced(...)` ヘルパーで作っているもの)、それ以外は auto。
+
+## 観測データの保存先
+
+```mermaid
+flowchart LR
+    APP["アプリ + nginx<br/>(各 span 生成)"]
+    APP -- "OTLP" --> COL["OTel Collector<br/>※ メモリ 1 秒バッファだけ<br/>永続化なし"]
+
+    COL -- "trace" --> T[("Tempo<br/>Parquet 形式<br/>WAL → blocks")]
+    COL -- "metrics<br/>(spanmetrics で生成)" --> P[("Prometheus<br/>TSDB 形式<br/>Gorilla 圧縮")]
+
+    T -. "/var/tempo<br/>retention=1h" .-> TV[/"tempo-data<br/>Docker volume<br/>~4MB"/]
+    P -. "/prometheus<br/>retention=15d" .-> PV[/"prometheus-data<br/>Docker volume<br/>~1MB"/]
+
+    T --> GR["Grafana<br/>(UI only)"]
+    P --> GR
+
+    GR -. "設定/ダッシュボード<br/>(grafana.db = SQLite)" .-> GV[/"grafana-data<br/>Docker volume<br/>~14MB"/]
+
+    style COL fill:#f8d7da,stroke:#dc3545
+    style TV fill:#cfe2ff,stroke:#0d6efd
+    style PV fill:#cfe2ff,stroke:#0d6efd
+    style GV fill:#cfe2ff,stroke:#0d6efd
+```
+
 ```
 Browser
   │
