@@ -1,0 +1,192 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {"type": "row", "id": 100, "title": "HTTP リクエスト (auto)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+      "id": 1, "title": "HTTP route 別 RPS",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10, "stacking": {"mode": "normal"}}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "sum"]}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{service_name=\"laravel-app\", span_name=~\"GET /.*|POST /.*|PUT /.*|DELETE /.*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+      "id": 2, "title": "HTTP route 別 p95 latency",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "ms"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"]}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "histogram_quantile(0.95, sum(rate(traces_span_metrics_duration_milliseconds_bucket{service_name=\"laravel-app\", span_name=~\"GET /.*|POST /.*\"}[1m])) by (le, span_name))",
+        "legendFormat": "{{span_name}} p95"
+      }]
+    },
+
+    {"type": "row", "id": 101, "title": "Eloquent / SQL (auto)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+      "id": 3, "title": "SQL 種別ごとの実行レート",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 30, "stacking": {"mode": "normal"}}}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "sum"]}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"sql .*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+      "id": 4, "title": "Eloquent モデルメソッドごとの RPS",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "sum"]}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"App.Models.*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+
+    {"type": "row", "id": 102, "title": "HTTP Client (auto)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 19},
+      "id": 5, "title": "HTTP Client メソッド別 p95",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "ms"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"]}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "histogram_quantile(0.95, sum(rate(traces_span_metrics_duration_milliseconds_bucket{span_name=~\"GET|POST|PUT|DELETE|PATCH\"}[1m])) by (le, span_name))",
+        "legendFormat": "{{span_name}} p95"
+      }]
+    },
+
+    {"type": "row", "id": 103, "title": "Cache (手動計装)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "id": 6, "title": "Cache::remember rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "right", "showLegend": true}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"Cache.*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "id": 7, "title": "Cache 関連スパン (実トレース)",
+      "type": "table",
+      "options": {"showHeader": true},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "tempo", "uid": "tempo"},
+        "queryType": "traceql",
+        "query": "{ name =~ \"Cache.*\" }",
+        "tableType": "traces",
+        "limit": 20
+      }]
+    },
+
+    {"type": "row", "id": 104, "title": "Event / Listener (手動計装)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 36}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 37},
+      "id": 8, "title": "Event dispatch rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "right", "showLegend": true}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"Event:.*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 37},
+      "id": 9, "title": "Event 関連スパン (実トレース)",
+      "type": "table",
+      "options": {"showHeader": true},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "tempo", "uid": "tempo"},
+        "queryType": "traceql",
+        "query": "{ name =~ \"Event:.*\" }",
+        "tableType": "traces",
+        "limit": 20
+      }]
+    },
+
+    {"type": "row", "id": 105, "title": "Queue Job (手動計装)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 45}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 46},
+      "id": 10, "title": "Job dispatch rate",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "list", "placement": "right", "showLegend": true}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"Job:.*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 46},
+      "id": 11, "title": "Job 関連スパン (実トレース)",
+      "type": "table",
+      "options": {"showHeader": true},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "tempo", "uid": "tempo"},
+        "queryType": "traceql",
+        "query": "{ name =~ \"Job:.*\" }",
+        "tableType": "traces",
+        "limit": 20
+      }]
+    },
+
+    {"type": "row", "id": 106, "title": "Artisan コマンド (auto)", "collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 54}},
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 55},
+      "id": 12, "title": "Artisan コマンド rate (Command コマンド名で集計)",
+      "type": "timeseries",
+      "fieldConfig": {"defaults": {"unit": "reqps"}},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "sum"]}},
+      "targets": [{
+        "refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr": "sum(rate(traces_span_metrics_calls_total{span_name=~\"Command .*\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["otel", "lab", "categories"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "OTel Categories (HTTP / Eloquent / HTTP Client / Cache / Event / Queue / Artisan)",
+  "uid": "otel-lab-categories",
+  "version": 2
+}
