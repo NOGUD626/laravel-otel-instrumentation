@@ -1,4 +1,6 @@
-# Laravel + nginx + PHP-FPM + PostgreSQL + OpenTelemetry 検証ラボ
+# Laravel での OpenTelemetry 計装検証
+
+> Laravel に OpenTelemetry を入れる時、**公式 contrib-auto-laravel と community keepsuit/laravel-opentelemetry のどちらを選ぶか** を実機で見比べるための Docker Compose 検証環境。nginx (ngx_otel_module) + PHP-FPM (ext-opentelemetry) + PostgreSQL + OTel Collector + Tempo + Prometheus + Grafana のフルスタック。
 
 ![Laravel](https://img.shields.io/badge/Laravel-11-FF2D20?logo=laravel&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?logo=php&logoColor=white)
